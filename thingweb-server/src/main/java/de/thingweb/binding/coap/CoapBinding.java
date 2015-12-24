@@ -33,6 +33,7 @@ import org.eclipse.californium.core.server.resources.Resource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.Collection;
 
 
@@ -77,7 +78,7 @@ public class CoapBinding implements Binding {
 
                 if(existing != null) {
                     Collection<Resource> children = existing.getChildren();
-                    children.forEach((child) -> newRes.add(child));
+                    children.forEach(newRes::add);
                 }
 
                 current.add(newRes);
@@ -89,5 +90,10 @@ public class CoapBinding implements Binding {
 	public void start() {
 		m_coapServer.start();
 	}
+
+    @Override
+    public void stop() throws IOException {
+        m_coapServer.stop();
+    }
 
 }

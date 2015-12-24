@@ -26,17 +26,15 @@ package de.thingweb.servient.impl;
 
 import de.thingweb.binding.RESTListener;
 import de.thingweb.binding.ResourceBuilder;
+import de.thingweb.desc.pojo.ThingDescription;
 import de.thingweb.servient.Defines;
-import de.thingweb.servient.InteractionListener;
+import de.thingweb.servient.ThingInterface;
 import de.thingweb.servient.ThingServer;
 import de.thingweb.thing.Action;
 import de.thingweb.thing.Property;
 import de.thingweb.thing.Thing;
 
 import java.util.*;
-import java.util.concurrent.CopyOnWriteArrayList;
-import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.logging.Logger;
 
 
@@ -45,197 +43,111 @@ import java.util.logging.Logger;
  * bindings simultaneously.
  */
 public class MultiBindingThingServer implements ThingServer {
-	
-	/** The logger. */
-	private final static Logger log = Logger.getLogger(MultiBindingThingServer.class.getCanonicalName());
-	
-	public MultiBindingThingServer(Thing thingModel, 
-			ResourceBuilder ... bindings) {
-		
-		if (null == thingModel) {
-			throw new IllegalArgumentException("thingModel must not be null");
-		}
-		
-		for (ResourceBuilder b : bindings) {
-			m_bindings.add(b);
-		}
-		
-		m_thingModel = thingModel;
-		m_state = new StateContainer(m_thingModel);
 
-		createBindings();
-
-	}
-	
-
-	@Override
-	public void setProperty(Property property, Object value) {
-		if (null == property) {
-			throw new IllegalArgumentException("property must not be null");
-		}
-		if (!m_thingModel.isOwnerOf(property)) {
-			throw new IllegalArgumentException(
-					"property does not belong to served thing");
-		}
-		
-		synchronized (m_stateSync) {
-			m_state.setProperty(property, value);
-			for (InteractionListener listener : m_listeners) {
-				listener.onWriteProperty(property.getName(), value, this);
-			}
-			property.setChanged();
-		}
-	}
+    /**
+     * The logger.
+     */
+    protected final static Logger log = Logger.getLogger(MultiBindingThingServer.class.getCanonicalName());
+    private final Map<String, ServedThing> things = new LinkedHashMap<>();
+    private final Collection<ResourceBuilder> m_bindings = new ArrayList<>();
 
 
-	@Override
-	public void setProperty(String propertyName, Object value) {
-		Property prop = m_thingModel.getProperty(propertyName);
-		
-		if (null == prop) {
-			throw new IllegalArgumentException("no such property: " + 
-					propertyName);
-		}
-		
-		setProperty(prop, value);
-	}
-	
-	
-	@Override
-	public Object getProperty(Property property) {
-		if (null == property) {
-			throw new IllegalArgumentException("property must not be null");
-		}
-		if (!m_thingModel.isOwnerOf(property)) {
-			throw new IllegalArgumentException(
-					"property does not belong to served thing");
-		}
+    public MultiBindingThingServer(Thing thingModel,
+                                   ResourceBuilder... bindings) {
 
-		for (InteractionListener listener : m_listeners) {
-			listener.onReadProperty(property.getName(), this);
-		}
+        for (ResourceBuilder b : bindings) {
+            m_bindings.add(b);
+        }
 
-		synchronized (m_stateSync) {
-			return m_state.getProperty(property);
-		}
-
-	}
+        addThing(thingModel);
+    }
 
 
-	@Override
-	public Object getProperty(String propertyName) {
-		Property prop = m_thingModel.getProperty(propertyName);
-		
-		if (null == prop) {
-			throw new IllegalArgumentException("no such property: " + 
-					propertyName);
-		}
-		
-		return getProperty(prop);
-	}
+    public MultiBindingThingServer(ResourceBuilder... bindings) {
+        Collections.addAll(m_bindings, bindings);
+    }
 
-	@Override
-	public void onUpdate(String propertyName, Consumer<Object> callback) {
-		this.addInteractionListener(new InteractionListener() {
-			@Override
-			public void onReadProperty(String propertyName, ThingServer thingServer) {
+    @Override
+    public ThingInterface addThing(Thing thing) {
+        if (null == thing) {
+            throw new IllegalArgumentException("thingModel must not be null");
+        }
+        ServedThing servedThing = new ServedThing(thing);
+        things.put(thing.getName().toLowerCase(), servedThing);
+        createBindings(servedThing);
+        return servedThing;
+    }
 
-			}
+    @Override
+    public ThingInterface addThing(ThingDescription thingDescription) {
+        return addThing(new Thing(thingDescription));
+    }
 
-			@Override
-			public void onWriteProperty(String changedPropertyName, Object newValue, ThingServer thingServer) {
-				if(changedPropertyName.equals(propertyName)) {
-					callback.accept(newValue);
-				}
-			}
-		});
-	}
+    @Override
+    public ThingInterface getThing(String thingName) {
+        return things.get(thingName.toLowerCase());
+    }
 
-	@Override
-	public void onInvoke(String actionName, Function<Object, Object> callback) {
-		Action action = m_thingModel.getAction(actionName);
-		if(action == null) {
-			log.warning("onInvoke for actionName '" + actionName + "' not found in thing model");
-		} else {
-			m_state.addHandler(action, callback);
-		}
-	}
+    private void createBindings(ServedThing thingModel) {
+        for (ResourceBuilder binding : m_bindings) {
+            createBinding(binding, thingModel);
+        }
+    }
 
-	@Override
-	public void addInteractionListener(InteractionListener listener) {
-		m_listeners.add(listener);
-	}
-	
-	
-	private void createBindings() {
-		for (ResourceBuilder binding : m_bindings) {
-			createBinding(binding);
-		}
-	}
+    private void createBinding(ResourceBuilder resources, ServedThing servedThing) {
+        Thing thingModel = servedThing.getThingModel();
 
-		
-	private void createBinding(ResourceBuilder resources) {
+        // root
+        resources.newResource(Defines.BASE_URL, new HypermediaIndex(
+                        new HyperMediaLink("things", Defines.BASE_THING_URL)
+                )
+        );
 
-		// root
-		resources.newResource(Defines.BASE_URL, new HypermediaIndex(
-						new HyperMediaLink("things", Defines.BASE_THING_URL)
-			)
-		);
+        // things
+        resources.newResource(Defines.BASE_THING_URL, new HypermediaIndex(
+                        new HyperMediaLink("thing", Defines.BASE_THING_URL + thingModel.getName())
+                )
+        );
 
-		// things
-		resources.newResource(Defines.BASE_THING_URL, new HypermediaIndex(
-						new HyperMediaLink("thing", Defines.BASE_THING_URL + m_thingModel.getName())
-				)
-		);
+        Collection<Property> properties = thingModel.getProperties();
+        Collection<Action> actions = thingModel.getActions();
 
-		Collection<Property> properties = m_thingModel.getProperties();
-		Collection<Action> actions = m_thingModel.getActions();
+        List<HyperMediaLink> interactionLinks = new LinkedList<>();
+        Map<String, RESTListener> interactionListeners = new HashMap<>();
 
-		List<HyperMediaLink> interactionLinks = new LinkedList<>();
+        // collect properties
+        for (Property property : properties) {
+            String url = Defines.BASE_THING_URL + thingModel.getName() + "/" + property.getName();
 
-		Map<String,RESTListener> interactionListeners = new HashMap<>();
+            interactionListeners.put(url, new PropertyListener(servedThing, property));
 
-		// collect properties
-		for (Property property : properties) {
-			String url = Defines.BASE_THING_URL + m_thingModel.getName() + "/" + property.getName();
-			interactionListeners.put(url, new PropertyListener(this, property));
-			interactionListeners.put(url + "/value", new PropertyListener(this, property));
-			interactionLinks.add(new HyperMediaLink("property", url));
-		}
+//            TODO I'll comment this out until we have /value on the microcontroller
+//            interactionListeners.put(url, new HypermediaIndex(
+//                    new HyperMediaLink("value","value"),
+//                    new HyperMediaLink("update","value","PUT","TBD")
+//            ));
 
-		// collect actions
-		for (Action action : actions) {
-			//TODO optimize by preconstructing strings and using format
-			String url = Defines.BASE_THING_URL + m_thingModel.getName() + "/" + action.getName();
-			interactionListeners.put(url, new ActionListener(m_state, action));
-			interactionLinks.add(new HyperMediaLink("action", url));
-		}
+            interactionListeners.put(url + "/value", new PropertyListener(servedThing, property));
+            interactionLinks.add(new HyperMediaLink("property", url));
+        }
 
-		// thing root
-		resources.newResource(Defines.BASE_THING_URL + m_thingModel.getName(),
-				new HypermediaIndex(interactionLinks)
-		);
+        // collect actions
+        for (Action action : actions) {
+            //TODO optimize by preconstructing strings and using format
+            String url = Defines.BASE_THING_URL + thingModel.getName() + "/" + action.getName();
+            interactionListeners.put(url, new ActionListener(servedThing, action));
+            interactionLinks.add(new HyperMediaLink("action", url));
+        }
 
-		// leaves last (side-effect of coap-binding)
-		interactionListeners.entrySet().stream().forEachOrdered(
-				entry -> resources.newResource(entry.getKey(), entry.getValue())
-		);
-	}
+        // thing root
+        resources.newResource(Defines.BASE_THING_URL + thingModel.getName(),
+                new HypermediaIndex(interactionLinks)
+        );
 
-	/**
-	 * Sync object for {@link #m_stateSync}.
-	 */
-	private final Object m_stateSync = new Object();
-	
-	
-	private final StateContainer m_state;
-	
-
-	private final Collection<InteractionListener> m_listeners = 
-			new CopyOnWriteArrayList<>();
-
-	private final Collection<ResourceBuilder> m_bindings = new ArrayList<>(); 
-
-	private final Thing m_thingModel;
+        // leaves last (side-effect of coap-binding)
+        interactionListeners.entrySet().stream().forEachOrdered(
+                entry -> resources.newResource(entry.getKey(), entry.getValue())
+        );
+    }
 
 }

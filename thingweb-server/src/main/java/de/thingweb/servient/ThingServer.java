@@ -25,21 +25,17 @@
 package de.thingweb.servient;
 
 
-import java.util.function.Consumer;
-import java.util.function.Function;
+import de.thingweb.desc.pojo.ThingDescription;
+import de.thingweb.thing.Thing;
 
 /**
  * The ThingServer is thread safe.
  */
-public interface ThingServer extends ThingInterface {
-	/**
-	 * Adds an InteractionListener to this server.
-	 * 
-	 * @param listener the listener to add, must not be null
-	 */
-	void addInteractionListener(InteractionListener listener);
+public interface ThingServer {
 
-	void onInvoke(String actionName, Function<Object, Object> callback);
+    ThingInterface addThing(Thing thing);
 
-	void onUpdate(String propertyName, Consumer<Object> callback);
+    ThingInterface addThing(ThingDescription thingDescription);
+
+    ThingInterface getThing(String thingName);
 }
