@@ -25,14 +25,19 @@
 package de.thingweb.desc;
 
 import com.fasterxml.jackson.core.JsonParseException;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.jsonldjava.core.JsonLdError;
 import com.github.jsonldjava.core.JsonLdOptions;
 import com.github.jsonldjava.core.JsonLdProcessor;
 import com.github.jsonldjava.utils.JsonUtils;
 import com.siemens.ct.exi.exceptions.EXIException;
+
 import de.thingweb.desc.pojo.ThingDescription;
 import de.thingweb.encoding.json.exi.EXI4JSONParser;
+
 import org.json.JSONObject;
 import org.xml.sax.InputSource;
 import org.xml.sax.SAXException;
@@ -42,6 +47,7 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.HashMap;
 import java.util.Map;
 
 public class DescriptionParser {
@@ -101,6 +107,8 @@ public class DescriptionParser {
     
     public static ThingDescription fromBytes(byte[] data) throws JsonParseException, IOException {
     	ByteArrayInputStream bais = new ByteArrayInputStream(data);
+    	
+    	// check whether we deal with an exified JSON file
     	bais.mark(5); // latest after 4 byte cookie and 2 distinguishing bits it is clear whether we deal with an EXI file
     	try {
 			ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -112,7 +120,7 @@ public class DescriptionParser {
 			bais = new ByteArrayInputStream(baos.toByteArray());
 			
 		} catch (EXIException | SAXException e) {
-			// something went wrong with EXI --> reset & try json
+			// something went wrong with EXI --> reset & try "plain-text" json
 			bais.reset();
 		}
     	
@@ -128,6 +136,20 @@ public class DescriptionParser {
     	
 //    	Object jsonld = JsonUtils.fromReader(new FileReader(fname));
 //        return mapJson(jsonld);
+    }
+    
+    /**
+     * reshapes the input JSON-LD object using the standard
+     * Thing Description context.
+     * @param jsonld
+     * @return
+     * @throws IOException 
+     * @throws JsonProcessingException 
+     */
+    public static String reshape(String jsonld) throws JsonProcessingException, IOException {
+      ObjectMapper om = new ObjectMapper();
+      Object root = om.readValue(jsonld, HashMap.class);
+      return compactJson(root).toString();
     }
 
 }
